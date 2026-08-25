@@ -1,21 +1,48 @@
-Trivy was NOT available in this build sandbox (`trivy --version` / `where trivy`
-returned nothing, and there was no working Docker daemon to build an image to
-scan against - `docker build` failed with "failed to connect to the docker
-API... daemon is running" because Docker Desktop's engine was not started).
+Trivy was not available in the local build sandbox (no `trivy` CLI, no
+running Docker daemon), so the scan output below is real CI output, not
+fabricated: it's from the "security-scan" job's "Container image scan" step
+on the first GitHub Actions run of this pipeline (run 32902790201, commit
+937ab67), where `trivy image henkel-assessment-app:<sha>` failed the build
+with exit code 1.
 
-No scan output is included here because none was actually produced - see the
-project README's "Security" section, which explains this honestly instead of
-fabricating output.
+=== FINDINGS (before the fix in commit that follows this file) ===
 
-The scan IS wired into CI: .github/workflows/pipeline.yaml's "security-scan"
-job runs:
-  1. `trivy fs app/`  (dependency/SCA scan, SARIF uploaded to code scanning,
-     then re-run in table format with exit-code=1 on CRITICAL/HIGH)
-  2. `trivy image <built image>` (same pattern)
+alpine 3.23.4 (OS packages):
+  HIGH  CVE-2026-45447  libcrypto3 / libssl3  3.5.6-r0 -> fixed in 3.5.7-r0
+        openssl: Heap Use-After-Free in OpenSSL PKCS7_verify()
 
-On the first push to a GitHub repo with Actions enabled, that job will
-produce real Trivy output, visible in the Actions run log and in the
-repository's Security > Code scanning alerts tab (from the uploaded SARIF).
+Node.js (node-pkg) - 19 findings (1 CRITICAL, 18 HIGH), e.g.:
+  CRITICAL  CVE-2026-59873  tar 6.2.1 -> 7.5.19  (DoS via crafted gzip bomb)
+  HIGH      CVE-2026-23745..73566 (7 more tar CVEs), CVE-2026-13149/14257/69152
+            (brace-expansion), CVE-2024-21538 (cross-spawn),
+            CVE-2025-64756 (glob), CVE-2026-69192 (ip-address),
+            CVE-2026-26996/27903/27904 (minimatch), CVE-2026-48815 (sigstore)
+
+=== ROOT CAUSE ===
+
+All 19 Node.js findings were NOT in the application's own dependencies -
+`app/node_modules/*` (express, body-parser, etc.) all reported 0
+vulnerabilities in the same scan. Every finding was under
+`usr/local/lib/node_modules/npm/...` and `opt/yarn-v1.22.22/...`: the npm
+and yarn package managers that the `node:20-alpine` base image bundles for
+build-time convenience, and their own vendored dependencies. The app never
+executes npm/yarn at runtime (only `node server.js` does), so this was
+unnecessary attack surface + image weight, not an application vulnerability.
+
+=== FIX ===
+
+See the Dockerfile: the runtime stage now (1) runs `apk upgrade --no-cache`
+to pick up the patched openssl packages, and (2) deletes npm, npx, corepack,
+and yarn from the final image, since the app doesn't need them to run. This
+removes the entire Node.js finding set at the source instead of suppressing
+it via `.trivyignore`.
+
+This was not re-verified against a live Trivy run in this sandbox (still no
+Docker daemon / trivy CLI available here) - the next CI run on push will
+confirm whether the fix clears the gate. If OS-level findings recur on a
+later run, that's expected: `apk upgrade` only patches against CVEs known
+at image-build time, so this needs the image to be rebuilt periodically
+(see README "Missing improvements" - no scheduled rebuild is set up yet).
 
 To reproduce locally once Docker + Trivy are available:
 

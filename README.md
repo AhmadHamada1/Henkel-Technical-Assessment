@@ -180,6 +180,19 @@ GitHub at all (see "Security" below).
   `npm ci --omit=dev` production dependencies and the two application
   files; no dev tooling, no build cache, no source of the test suite ships
   in the runtime image.
+- **npm/npx/corepack/yarn stripped from the runtime image** — the base
+  image bundles these for build-time convenience, but the app only ever
+  runs `node server.js`. The first real CI run found 19 Node.js CVEs (1
+  CRITICAL) purely inside npm's/yarn's own vendored dependencies
+  (`node-tar`, `minimatch`, `cross-spawn`, ...) under
+  `/usr/local/lib/node_modules/npm/...` — none in the app's own
+  `app/node_modules`. Deleting the unused tooling removes that whole
+  finding set at the source instead of suppressing it in `.trivyignore`.
+  See [`docs/security-scan-output.txt`](docs/security-scan-output.txt).
+- **`apk upgrade --no-cache` in the runtime stage** — the same CI run also
+  flagged a HIGH openssl CVE (CVE-2026-45447) in the alpine base's
+  `libssl3`/`libcrypto3` packages; upgrading picks up the already-published
+  fix without changing the base image tag.
 - **No secrets in the image** — nothing is baked in; runtime config (only
   `PORT` here) comes from environment variables set by the platform.
 - **`HEALTHCHECK` instruction** — container-level liveness check hitting
@@ -219,6 +232,9 @@ GitHub at all (see "Security" below).
 
 **What would still be fixed with more time:**
 
+- A scheduled rebuild (e.g. weekly GitHub Actions cron) so `apk upgrade`
+  keeps picking up newly published OS patches even between app code
+  changes — right now the image is only rebuilt on a push.
 - Image signing + SLSA provenance attestation (cosign).
 - Private Endpoint for ACR (requires Premium SKU — cost tradeoff vs. Basic).
 - If migrated to AKS: Azure Policy / Kubernetes admission control (e.g.
@@ -229,21 +245,16 @@ GitHub at all (see "Security" below).
   long-lived (none currently exist in this design, by design).
 - WAF in front of the Container App's public ingress.
 
-**Trivy scan output:** Trivy was **not available in this build sandbox**
-(no `trivy` binary on `PATH`, and no running Docker daemon to build an image
-to scan — Docker Desktop's engine was not started, so even `docker build`
-itself could not be executed here; see "What was actually verified" below).
-No fabricated scan output is included. What's provided instead:
-
-- [`docs/security-scan-output.txt`](docs/security-scan-output.txt) — an
-  honest note on what wasn't run and exactly how to reproduce it locally
-  once Docker + Trivy are available (`trivy fs app/`, `trivy image
-  <built-image>`).
-- The scan **is fully wired into CI** — `.github/workflows/pipeline.yaml`'s
-  `security-scan` job runs both scans on every push/PR and will produce real
-  output (visible in the Actions log and in the repo's Security → Code
-  scanning tab) the first time this repo is pushed to GitHub with Actions
-  enabled.
+**Trivy scan output:** Trivy was not available in the local build sandbox
+(no `trivy` binary on `PATH`, no running Docker daemon), but the scan is
+wired into CI and **did produce real output on the first push** — the
+`security-scan` job's image scan found the 19 npm/yarn-tooling CVEs and the
+1 openssl CVE described above and correctly failed the build (`exit-code:
+1` on CRITICAL/HIGH). See
+[`docs/security-scan-output.txt`](docs/security-scan-output.txt) for the
+actual findings and the fix. The fix itself (stripping npm/yarn, `apk
+upgrade`) was **not yet re-verified against a live Trivy run** in this
+sandbox — the next CI run on push will confirm whether it clears the gate.
 
 ## What was actually verified in this sandbox (honesty section)
 
