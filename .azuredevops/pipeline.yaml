@@ -1,0 +1,163 @@
+# Azure DevOps equivalent of .github/workflows/pipeline.yaml, added to match
+# the assessment brief's literal example path. NOT the pipeline actually
+# wired to this repo (it lives on GitHub, so GitHub Actions is what runs -
+# see the README "Key decisions"); this file has never been run against a
+# real Azure DevOps org/project and is provided as a parallel reference
+# implementation, not a second source of truth.
+#
+# Requires, in the Azure DevOps project:
+#   - An Azure Resource Manager service connection using Workload Identity
+#     Federation (OIDC) - no stored client secret, same guarantee as the
+#     GitHub Actions OIDC login.
+#   - Pipeline variables: ACR_NAME, AZURE_RESOURCE_GROUP,
+#     CONTAINER_APP_NAME, AZURE_SERVICE_CONNECTION (the service connection
+#     name above).
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  imageName: henkel-assessment-app
+  npm_config_cache: $(Pipeline.Workspace)/.npm
+  acrName: $(ACR_NAME)
+  resourceGroup: $(AZURE_RESOURCE_GROUP)
+  containerAppName: $(CONTAINER_APP_NAME)
+  azureServiceConnection: $(AZURE_SERVICE_CONNECTION)
+
+stages:
+  - stage: BuildTest
+    jobs:
+      - job: BuildTest
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '20.x'
+
+          - task: Cache@2
+            inputs:
+              key: 'npm | "$(Agent.OS)" | app/package-lock.json'
+              restoreKeys: 'npm | "$(Agent.OS)"'
+              path: $(npm_config_cache)
+            displayName: Cache npm packages
+
+          - script: npm ci
+            workingDirectory: app
+            displayName: Install dependencies
+
+          - script: npm test
+            workingDirectory: app
+            displayName: Run tests
+
+          - script: docker build -t $(imageName):$(Build.SourceVersion) .
+            displayName: Build image (local, for smoke test)
+
+          - script: |
+              set -e
+              container_id=$(docker run -d -p 8080:8080 $(imageName):$(Build.SourceVersion))
+              for i in $(seq 1 10); do
+                if curl -sf http://localhost:8080/health; then
+                  echo "health check passed"
+                  break
+                fi
+                if [ "$i" -eq 10 ]; then
+                  echo "health check failed after 10 attempts"
+                  docker logs "$container_id"
+                  exit 1
+                fi
+                sleep 1
+              done
+              docker stop "$container_id"
+            displayName: Smoke test container
+
+  - stage: SecurityScan
+    dependsOn: BuildTest
+    jobs:
+      - job: SecurityScan
+        steps:
+          - script: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+            displayName: Install Trivy
+
+          - script: trivy fs --severity CRITICAL,HIGH --exit-code 1 --ignorefile .trivyignore app
+            displayName: Dependency (SCA) scan - filesystem
+
+          - script: docker build -t $(imageName):$(Build.SourceVersion) .
+            displayName: Build image for scanning
+
+          - script: trivy image --severity CRITICAL,HIGH --exit-code 1 --ignorefile .trivyignore $(imageName):$(Build.SourceVersion)
+            displayName: Container image scan
+          # No direct equivalent of GitHub's SARIF code-scanning upload here;
+          # a real setup would publish the SARIF as a build artifact or feed
+          # it to the Microsoft Security DevOps extension.
+
+  - stage: PushImage
+    dependsOn:
+      - BuildTest
+      - SecurityScan
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: Push
+        steps:
+          - task: AzureCLI@2
+            displayName: Build and push to ACR
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -e
+                az acr login --name $(acrName)
+                docker build \
+                  -t $(acrName).azurecr.io/$(imageName):$(Build.SourceVersion) \
+                  -t $(acrName).azurecr.io/$(imageName):latest .
+                docker push $(acrName).azurecr.io/$(imageName):$(Build.SourceVersion)
+                docker push $(acrName).azurecr.io/$(imageName):latest
+
+  - stage: Deploy
+    dependsOn: PushImage
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: Deploy
+        steps:
+          - task: AzureCLI@2
+            displayName: Deploy new image to Container Apps
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az containerapp update \
+                  --name $(containerAppName) \
+                  --resource-group $(resourceGroup) \
+                  --image $(acrName).azurecr.io/$(imageName):$(Build.SourceVersion)
+
+          - task: AzureCLI@2
+            displayName: Validate deployment
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -e
+                fqdn=$(az containerapp show \
+                  --name $(containerAppName) \
+                  --resource-group $(resourceGroup) \
+                  --query properties.configuration.ingress.fqdn -o tsv)
+                for i in $(seq 1 10); do
+                  if curl -sf "https://$fqdn/health"; then
+                    echo "deployment validated: https://$fqdn/health is healthy"
+                    exit 0
+                  fi
+                  sleep 5
+                done
+                echo "deployment validation failed: /health did not become healthy"
+                exit 1

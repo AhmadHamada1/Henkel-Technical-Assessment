@@ -12,9 +12,10 @@ design (4).
 ├── Dockerfile               Multi-stage, non-root, minimal base
 ├── infra/                   Terraform (Azure) — see infra/README.md
 │   └── modules/              registry / identity / container_app
-├── .github/workflows/pipeline.yaml   CI/CD
+├── .github/workflows/pipeline.yaml   CI/CD — the one actually wired to this repo
+├── .azuredevops/pipeline.yaml         Parallel Azure DevOps version, illustrative only (see below)
 ├── docs/
-│   ├── network-design.md + network-diagram.svg    Section 3
+│   ├── network-design.md + network-diagram.svg    Section 3 (SVG, not .drawio/.png — see file)
 │   ├── observability.md + alerts.yaml             Section 4
 │   ├── security-scan-output.txt                   Real CI scan timeline
 │   └── screenshots/                                Real run screenshots
@@ -57,7 +58,7 @@ terraform init -backend-config=backend.hcl && terraform plan
 
 - **Node/Express** — the app is intentionally trivial; the assessment is about the platform around it.
 - **Container Apps, not AKS** — lowest ops overhead for one small service. Deliberately inconsistent with Sections 3/4 (which are K8s-based); AKS would be the pick if this had to join that architecture.
-- **GitHub Actions, not Azure Pipelines** — repo lives on GitHub; the brief's `.azuredevops/...` was an example path, not a requirement.
+- **GitHub Actions as the primary CI/CD** — repo lives on GitHub. [`.azuredevops/pipeline.yaml`](.azuredevops/pipeline.yaml) is also included as a literal parallel to the brief's example path, mirroring the same 4 jobs and OIDC auth — but it's illustrative only, never run against a real Azure DevOps org.
 - **Trivy** — one tool for both SCA and image scanning, free, SARIF-integrated.
 - **OIDC everywhere** — no static Azure/ACR credentials stored in GitHub.
 
@@ -95,5 +96,6 @@ terraform init -backend-config=backend.hcl && terraform plan
 | `terraform fmt`/`init`/`validate` | **Ran for real** — `fmt` fixed real alignment drift, `init -backend=false` pulled the azurerm provider, `validate` passed clean |
 | `terraform plan`/`apply` | Not run — no Azure credentials anywhere |
 | `push`/`deploy` jobs | Not run — repo variables not configured |
+| `.azuredevops/pipeline.yaml` | Never run anywhere — no Azure DevOps org for this exercise; hand-written to mirror the GitHub workflow's logic |
 
 Everything above the line has real evidence (test output, CI logs, screenshots), not just claims — that was deliberate, not an oversight.
