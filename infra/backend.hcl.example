@@ -1,0 +1,6 @@
+# Copy to backend.hcl (gitignored) and fill in real values, then:
+#   terraform init -backend-config=backend.hcl
+resource_group_name  = "rg-henkelassess-tfstate"
+storage_account_name = "henkelassesstfstate"
+container_name       = "tfstate"
+key                  = "henkel-assessment.tfstate"

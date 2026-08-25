@@ -8,7 +8,8 @@ terraform {
     }
   }
 
-  # No backend block: this exercise uses local state; see infra/README.md.
+  # Partial config: values are supplied via `-backend-config=backend.hcl` at init time, see infra/README.md.
+  backend "azurerm" {}
 }
 
 provider "azurerm" {

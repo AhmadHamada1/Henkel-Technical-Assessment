@@ -17,7 +17,9 @@ and an observability/SRE design (Section 4).
 ├── .dockerignore
 ├── .trivyignore                  Empty placeholder + docs for vuln exceptions
 ├── infra/                        Terraform for Azure (Section 1, Part 2)
-│   ├── main.tf / variables.tf / outputs.tf / providers.tf
+│   ├── main.tf / variables.tf / outputs.tf / providers.tf   Root module, remote azurerm backend
+│   ├── backend.hcl.example       Backend config template (copy to backend.hcl, gitignored)
+│   ├── modules/                  registry / identity / container_app
 │   └── README.md                 Infra-specific usage notes
 ├── .github/workflows/pipeline.yaml   CI/CD (Section 1 Part 3 + Section 2 Part 2)
 ├── docs/
@@ -56,7 +58,8 @@ docker stop henkel-app
 
 ```bash
 cd infra
-terraform init
+cp backend.hcl.example backend.hcl   # fill in real state storage account values
+terraform init -backend-config=backend.hcl
 terraform plan
 # terraform apply   # requires az login / ARM_* credentials - NOT run in this exercise
 ```
@@ -128,9 +131,12 @@ GitHub at all (see "Security" below).
 
 ## Missing improvements / known limitations
 
-- **No remote Terraform state backend** — local state only (see
-  `infra/providers.tf` for the commented `azurerm` backend block that would
-  fix this). Not suitable for real team use as-is.
+- **Terraform is modularized** (`infra/modules/registry`, `identity`,
+  `container_app`) with a remote `azurerm` state backend — see
+  `infra/README.md`. The state storage account itself still needs a one-time
+  manual bootstrap (`az storage account create ...`, documented there), and
+  the backend was never actually initialized against a real storage account
+  in this sandbox.
 - **No `terraform apply` was run** against a live Azure subscription — no
   credentials were available in this sandbox. `terraform fmt`/`validate`
   were also not run because the Terraform CLI itself was not installed in
