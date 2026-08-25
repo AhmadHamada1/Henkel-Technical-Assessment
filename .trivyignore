@@ -1,16 +1,1 @@
-# Trivy vulnerability exceptions.
-#
-# Empty by default - every CRITICAL/HIGH finding currently fails the build
-# (see .github/workflows/pipeline.yaml, "security-scan" job).
-#
-# If a finding is a false positive, or is genuinely unfixable/not
-# exploitable in our deployment (e.g. no network path to the vulnerable
-# code), add the CVE ID here with a comment explaining why and, ideally, an
-# expiry/review date so exceptions don't accumulate silently:
-#
-# CVE-2024-XXXXX  # not exploitable: vulnerable code path is unreachable, we don't use <feature>. Review by 2026-12-01.
-#
-# In a real production setting this would live in a vulnerability
-# management tool (e.g. Dependency-Track) instead of a flat file, so
-# exceptions have owners, expiry dates, and an audit trail. See the
-# top-level README "Missing improvements" section.
+# Trivy vulnerability exceptions; empty by default. Format: CVE-2024-XXXXX  # reason, review by YYYY-MM-DD

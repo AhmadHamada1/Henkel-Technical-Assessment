@@ -1,8 +1,6 @@
 'use strict';
 
-// Uses Node's built-in test runner (node --test) instead of pulling in a
-// test framework, to keep the container image and CI dependency surface
-// small. http is used directly instead of adding supertest.
+// Uses Node's built-in test runner to avoid an extra dependency.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');

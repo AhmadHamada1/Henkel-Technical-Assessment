@@ -1,8 +1,6 @@
 name: CI/CD
 
-# Runs on every push/PR to main. Push+PR both get build/test/scan; only a
-# push to main (i.e. a merge) goes on to push the image and deploy, so PRs
-# never touch the registry or the live environment.
+# Push and PR both run build/test/scan; only a push to main deploys.
 on:
   push:
     branches: [main]
@@ -11,7 +9,7 @@ on:
 
 env:
   IMAGE_NAME: henkel-assessment-app
-  ACR_NAME: ${{ vars.ACR_NAME }}                       # e.g. henkelassessdevacr (no https://, no .azurecr.io)
+  ACR_NAME: ${{ vars.ACR_NAME }}
   RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
   CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
 
@@ -19,10 +17,7 @@ permissions:
   contents: read
 
 jobs:
-  # ---------------------------------------------------------------------
-  # Build + unit test the app, then build the container image and smoke
-  # test it locally (no registry/cloud access needed for this job).
-  # ---------------------------------------------------------------------
+  # Build, unit test, and smoke-test the container image.
   build-test:
     runs-on: ubuntu-latest
     steps:
@@ -59,7 +54,6 @@ jobs:
         run: |
           set -e
           container_id=$(docker run -d -p 8080:8080 ${{ env.IMAGE_NAME }}:${{ github.sha }})
-          # give the app a moment to boot before probing it
           for i in $(seq 1 10); do
             if curl -sf http://localhost:8080/health; then
               echo "health check passed"
@@ -74,18 +68,13 @@ jobs:
           done
           docker stop "$container_id"
 
-  # ---------------------------------------------------------------------
-  # SCA (dependency) scan + container image scan with Trivy.
-  # Findings at HIGH/CRITICAL fail the build (see README "Security" for the
-  # tradeoff discussion and how to grant a time-boxed exception via
-  # .trivyignore instead of silently ignoring severity).
-  # ---------------------------------------------------------------------
+  # Dependency (SCA) scan and container image scan with Trivy.
   security-scan:
     runs-on: ubuntu-latest
     needs: build-test
     permissions:
       contents: read
-      security-events: write   # required to upload SARIF to code scanning
+      security-events: write # required to upload SARIF to code scanning
     steps:
       - uses: actions/checkout@v4
 
@@ -97,7 +86,7 @@ jobs:
           format: sarif
           output: trivy-fs-results.sarif
           severity: CRITICAL,HIGH
-          exit-code: 0 # upload results first, then gate the build in the dedicated step below
+          exit-code: 0
           trivyignores: .trivyignore
 
       - name: Upload SCA SARIF to code scanning
@@ -155,19 +144,14 @@ jobs:
           exit-code: 1
           trivyignores: .trivyignore
 
-  # ---------------------------------------------------------------------
-  # Build + push to ACR. Only runs for pushes to main (never on PRs), and
-  # only after tests + security scans have passed.
-  # Auth: OIDC federated identity via azure/login, no client secret stored
-  # in GitHub - see README "Security" section.
-  # ---------------------------------------------------------------------
+  # Build and push to ACR; only on a push to main, after build-test and security-scan pass.
   push:
     runs-on: ubuntu-latest
     needs: [build-test, security-scan]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
-      id-token: write   # required for OIDC federated login
+      id-token: write  
     steps:
       - uses: actions/checkout@v4
 
@@ -178,7 +162,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Log in to ACR (via az, using the OIDC session - no admin password)
+      - name: Log in to ACR
         run: az acr login --name "$ACR_NAME"
 
       - name: Set up Docker Buildx
@@ -195,10 +179,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ---------------------------------------------------------------------
-  # Deploy the newly pushed image to Container Apps, then validate it by
-  # hitting the public FQDN's /health endpoint.
-  # ---------------------------------------------------------------------
+  # Deploy the newly pushed image to Container Apps, then validate /health.
   deploy:
     runs-on: ubuntu-latest
     needs: push

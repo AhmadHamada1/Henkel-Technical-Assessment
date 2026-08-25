@@ -1,11 +1,5 @@
-# Infrastructure for the Section 1/2 assessment app:
-#   - Resource group
-#   - Azure Container Registry (admin account disabled - pull is via managed identity)
-#   - User-assigned managed identity, granted AcrPull on the registry
-#     (this is the "identities required to host the application")
-#   - Log Analytics workspace (required by the Container Apps environment,
-#     and doubles as the log sink discussed in docs/observability.md)
-#   - Container Apps environment + Container App running the image built by CI
+# Resource group, ACR, a managed identity to pull from it, and the Container
+# App that runs the image built by CI.
 
 locals {
   resource_group_name = coalesce(var.resource_group_name, "rg-${var.project_name}-${var.environment}")
@@ -25,17 +19,12 @@ resource "azurerm_container_registry" "main" {
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   sku                 = var.acr_sku
-  # Admin credentials (username/password) are disabled on purpose - all
-  # push/pull auth goes through Azure AD identities (CI's federated OIDC
-  # identity for push, the Container App's managed identity for pull).
-  # See README "Security" section.
+  # Admin credentials disabled; auth goes through Azure AD identities instead.
   admin_enabled = false
   tags          = var.tags
 }
 
-# User-assigned identity so the Container App can pull from ACR without any
-# stored credential. This is the identity that satisfies the assessment's
-# "provision infra including identities required to host the application".
+# Lets the Container App pull from ACR without a stored credential.
 resource "azurerm_user_assigned_identity" "app" {
   name                = "id-${local.name_prefix}-app"
   resource_group_name = azurerm_resource_group.main.name
@@ -43,7 +32,6 @@ resource "azurerm_user_assigned_identity" "app" {
   tags                = var.tags
 }
 
-# Least-privilege: this identity can only pull images, nothing else.
 resource "azurerm_role_assignment" "acr_pull" {
   scope                = azurerm_container_registry.main.id
   role_definition_name = "AcrPull"
@@ -79,7 +67,6 @@ resource "azurerm_container_app" "main" {
     identity_ids = [azurerm_user_assigned_identity.app.id]
   }
 
-  # Pull auth: the app's own managed identity, not a stored ACR password.
   registry {
     server   = azurerm_container_registry.main.login_server
     identity = azurerm_user_assigned_identity.app.id
