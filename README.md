@@ -80,7 +80,7 @@ terraform init -backend-config=backend.hcl && terraform plan
 
 ## Known limitations
 
-- Terraform: modularized with a remote `azurerm` backend, but never run against live Azure (no CLI/credentials here) — `terraform validate` yourself before trusting it.
+- Terraform: `fmt`/`init`/`validate` pass for real (see below), but never `plan`/`apply`'d against live Azure — no credentials here.
 - `push`/`deploy` pipeline jobs: untested — need the repo variables above configured.
 - No autoscaling load test, no WAF, no service mesh/mTLS (noted as future work in the network design), and severity-only scan gating doesn't weigh exploitability (would pair with a tool like Dependency-Track in a real setting).
 
@@ -92,7 +92,8 @@ terraform init -backend-config=backend.hcl && terraform plan
 | Docker build/run | Not run locally (no daemon) — **ran repeatedly in CI**, green every time |
 | Trivy SCA + image scan | **Ran for real in CI** — a genuine fail→fix→pass cycle, see Security above |
 | SARIF → code scanning | Ran in CI on every scan |
-| Terraform validate/plan/apply | Not run anywhere — no CLI locally, no Azure credentials |
+| `terraform fmt`/`init`/`validate` | **Ran for real** — `fmt` fixed real alignment drift, `init -backend=false` pulled the azurerm provider, `validate` passed clean |
+| `terraform plan`/`apply` | Not run — no Azure credentials anywhere |
 | `push`/`deploy` jobs | Not run — repo variables not configured |
 
 Everything above the line has real evidence (test output, CI logs, screenshots), not just claims — that was deliberate, not an oversight.
