@@ -12,10 +12,12 @@ endpoints** on the backend or the database — only the frontend (behind an
 ingress/load balancer) is internet-facing. Everything else communicates over
 private, encrypted, cross-cloud connectivity.
 
-Diagram: [`network-diagram.svg`](network-diagram.svg) — SVG instead of the
-brief's `.drawio`/`.png` because it's plain text (diffable in git, no binary
-blob) and renders natively in any browser/GitHub preview without the draw.io
-app, while staying just as scalable/vector as `.drawio`.
+![Multi-cloud network diagram](network-diagram.svg)
+
+SVG instead of the brief's `.drawio`/`.png` because it's plain text
+(diffable in git, no binary blob) and renders natively — like above — in
+any browser/GitHub preview without the draw.io app, while staying just as
+scalable/vector as `.drawio`.
 
 ## 2. Design principle: zero public exposure for backend + data
 

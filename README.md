@@ -22,6 +22,13 @@ design (4).
 └── .trivyignore / .dockerignore
 ```
 
+## Network architecture (Section 3)
+
+![Multi-cloud network diagram](docs/network-diagram.svg)
+
+AWS EKS (frontend) ↔ Azure AKS/PostgreSQL (backend), no public endpoints on
+backend or data — full writeup in [`docs/network-design.md`](docs/network-design.md).
+
 ## Quick start
 
 **App**
