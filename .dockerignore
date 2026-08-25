@@ -1,0 +1,12 @@
+**/node_modules
+**/__tests__
+.git
+.github
+docs
+infra
+*.md
+.dockerignore
+Dockerfile
+.env
+.env.*
+npm-debug.log

@@ -1,0 +1,103 @@
+# Prometheus Alertmanager-style rule file.
+# Load into Prometheus via `rule_files:` in prometheus.yml, or as a
+# PrometheusRule CR if using the Prometheus Operator (kube-prometheus-stack).
+#
+# Thresholds here are documented starting defaults (see docs/observability.md
+# section 6) - tune against real traffic before treating them as production
+# paging thresholds.
+
+groups:
+  - name: backend-api-availability
+    rules:
+      # Multi-window burn-rate alert for a 99.9% availability SLO.
+      # Fires only when BOTH the 5m and 1h error rates are high, which is
+      # the standard way to avoid paging on a brief, self-resolving blip
+      # while still catching a genuine fast-burning outage quickly.
+      - alert: BackendAPIErrorBudgetFastBurn
+        expr: |
+          (
+            sum(rate(http_requests_total{service="backend-api", status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{service="backend-api"}[5m]))
+          ) > (14.4 * 0.001)
+          and
+          (
+            sum(rate(http_requests_total{service="backend-api", status=~"5.."}[1h]))
+            /
+            sum(rate(http_requests_total{service="backend-api"}[1h]))
+          ) > (14.4 * 0.001)
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "backend-api is burning its error budget fast enough to exhaust the monthly SLO in under 2 days"
+          description: "5xx rate over both the 5m and 1h windows exceeds the fast-burn threshold for a 99.9% SLO. Immediate investigation required."
+          runbook_url: "https://runbooks.internal.example.com/backend-api/error-budget-burn"
+
+  - name: backend-api-latency
+    rules:
+      - alert: BackendAPIHighLatencyP99Warning
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="backend-api"}[5m])) by (le)
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "backend-api p99 latency above 1s for 10 minutes"
+          description: "p99 request duration has been above 1s for at least 10 minutes. Check the Infrastructure Observability dashboard for CPU/memory saturation and the Application dashboard for slow dependency (DB) calls."
+          runbook_url: "https://runbooks.internal.example.com/backend-api/high-latency"
+
+      - alert: BackendAPIHighLatencyP99Critical
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="backend-api"}[5m])) by (le)
+          ) > 1
+        for: 30m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "backend-api p99 latency above 1s for 30+ minutes - escalated"
+          description: "Sustained high latency for 30 minutes. Escalating from warning to critical/page."
+          runbook_url: "https://runbooks.internal.example.com/backend-api/high-latency"
+
+  - name: backend-api-errors
+    rules:
+      - alert: BackendAPIHighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{service="backend-api", status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{service="backend-api"}[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "backend-api 5xx error rate above 5%"
+          description: "More than 5% of requests to backend-api are failing with a 5xx over the last 5 minutes."
+          runbook_url: "https://runbooks.internal.example.com/backend-api/high-error-rate"
+
+  - name: backend-api-infra
+    rules:
+      # Example USE-side alert: sustained CPU throttling is a common root
+      # cause of the "occasional latency spikes" described in the brief.
+      - alert: BackendAPIPodCPUThrottling
+        expr: |
+          sum(rate(container_cpu_cfs_throttled_periods_total{namespace="backend"}[5m])) by (pod)
+          /
+          sum(rate(container_cpu_cfs_periods_total{namespace="backend"}[5m])) by (pod)
+          > 0.25
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Pod {{ $labels.pod }} is CPU throttled >25% of the time"
+          description: "Sustained CPU throttling often manifests as intermittent latency spikes. Consider raising CPU limits or investigating a hot loop."
+          runbook_url: "https://runbooks.internal.example.com/backend-api/cpu-throttling"

@@ -1,0 +1,17 @@
+{
+  "name": "henkel-assessment-app",
+  "version": "1.0.0",
+  "description": "Minimal Express service used for the Henkel platform engineering assessment",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

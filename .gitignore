@@ -1,0 +1,14 @@
+node_modules/
+
+# Terraform
+# Note: .terraform.lock.hcl is intentionally NOT ignored - it should be
+# committed for reproducible provider versions. It doesn't exist yet here
+# since `terraform init` was never run in this sandbox (see README).
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+.env
+.env.*

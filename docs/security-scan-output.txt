@@ -1,0 +1,24 @@
+Trivy was NOT available in this build sandbox (`trivy --version` / `where trivy`
+returned nothing, and there was no working Docker daemon to build an image to
+scan against - `docker build` failed with "failed to connect to the docker
+API... daemon is running" because Docker Desktop's engine was not started).
+
+No scan output is included here because none was actually produced - see the
+project README's "Security" section, which explains this honestly instead of
+fabricating output.
+
+The scan IS wired into CI: .github/workflows/pipeline.yaml's "security-scan"
+job runs:
+  1. `trivy fs app/`  (dependency/SCA scan, SARIF uploaded to code scanning,
+     then re-run in table format with exit-code=1 on CRITICAL/HIGH)
+  2. `trivy image <built image>` (same pattern)
+
+On the first push to a GitHub repo with Actions enabled, that job will
+produce real Trivy output, visible in the Actions run log and in the
+repository's Security > Code scanning alerts tab (from the uploaded SARIF).
+
+To reproduce locally once Docker + Trivy are available:
+
+  docker build -t henkel-assessment-app:local .
+  trivy fs --severity CRITICAL,HIGH app/
+  trivy image --severity CRITICAL,HIGH henkel-assessment-app:local
