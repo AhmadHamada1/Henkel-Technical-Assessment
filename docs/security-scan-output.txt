@@ -1,7 +1,10 @@
 Trivy was never available in the local build sandbox (no `trivy` CLI, no
 running Docker daemon there), so every scan result documented here is real
 GitHub Actions CI output from the actual pushed repository - not fabricated,
-and not run locally.
+and not run locally. Screenshots of the actual runs are in
+docs/screenshots/: security-scan-run3-failed.png (run 3, the real
+CRITICAL/HIGH findings below) and repo-after-fix.png (repo state after the
+fix landed).
 
 === RUN 1: security-scan job failed to start ===
 Commit 843c9eb (run 32900480446)
@@ -21,6 +24,7 @@ Fix: commit 937ab67, bumped to `aquasecurity/trivy-action@v0.36.0`.
 
 === RUN 3: security-scan job ran and correctly failed the build ===
 Commit 937ab67 (run 32902790201, job 97981508869)
+Screenshot: docs/screenshots/security-scan-run3-failed.png
 Trivy actually executed this time and found real findings in the built
 image (henkel-assessment-app:937ab674c1ad4934caedf3513b96aa0abf4dee91):
 

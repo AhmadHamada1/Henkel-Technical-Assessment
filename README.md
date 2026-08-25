@@ -27,7 +27,8 @@ and an observability/SRE design (Section 4).
 │   ├── network-diagram.svg       Section 3: architecture diagram
 │   ├── observability.md          Section 4: observability & SRE design
 │   ├── alerts.yaml               Section 4: Prometheus alerting rules
-│   └── security-scan-output.txt  Section 2: honest note on scan execution (see below)
+│   ├── security-scan-output.txt  Section 2: real CI scan timeline (fail -> fix -> pass, see below)
+│   └── screenshots/              Actual GitHub Actions run screenshots referenced above
 └── README.md                     This file
 ```
 
@@ -189,7 +190,9 @@ GitHub at all (see "Security" below).
   `/usr/local/lib/node_modules/npm/...` — none in the app's own
   `app/node_modules`. Deleting the unused tooling removes that whole
   finding set at the source instead of suppressing it in `.trivyignore`.
-  See [`docs/security-scan-output.txt`](docs/security-scan-output.txt).
+  See [`docs/security-scan-output.txt`](docs/security-scan-output.txt) and
+  the actual run screenshot,
+  [`docs/screenshots/security-scan-run3-failed.png`](docs/screenshots/security-scan-run3-failed.png).
 - **`apk upgrade --no-cache` in the runtime stage** — the same CI run also
   flagged a HIGH openssl CVE (CVE-2026-45447) in the alpine base's
   `libssl3`/`libcrypto3` packages; upgrading picks up the already-published
@@ -254,7 +257,8 @@ finding-and-fix cycle in between:
 1. First successful run (commit 937ab67) found real findings and correctly
    **failed the build**: 1 CRITICAL + 18 HIGH Node.js CVEs (all inside
    npm's/yarn's own bundled dependencies, not the app's) plus 1 HIGH openssl
-   CVE in the alpine base.
+   CVE in the alpine base — screenshot:
+   [`docs/screenshots/security-scan-run3-failed.png`](docs/screenshots/security-scan-run3-failed.png).
 2. After the Dockerfile fix (commit 5a8acd2, stripping unused npm/yarn +
    `apk upgrade`), the next run's `security-scan` job **succeeded** — no
    CRITICAL/HIGH findings remained.
