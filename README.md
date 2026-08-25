@@ -142,10 +142,11 @@ GitHub at all (see "Security" below).
   were also not run because the Terraform CLI itself was not installed in
   this sandbox (see "What was actually verified" below); the files were
   hand-written against the `azurerm` provider docs.
-- **The CI/CD pipeline was not exercised end-to-end** — no live Azure
-  subscription/repo secrets are wired up. The build/test/scan jobs would run
-  on any push; the push/deploy jobs would only activate once the repo
-  variables above are configured.
+- **The CI/CD pipeline has not been exercised end-to-end** — no live Azure
+  subscription/repo secrets are wired up. The `build-test` and
+  `security-scan` jobs have actually run (repeatedly, including a real
+  fail→fix→pass cycle, see the Security section); `push`/`deploy` will only
+  activate once the repo variables above are configured.
 - **No autoscaling load test** — `min_replicas`/`max_replicas` are set to
   sensible defaults but were never validated under real load.
 - **No WAF or ingress rate limiting** configured on the Container App or in
@@ -245,40 +246,52 @@ GitHub at all (see "Security" below).
   long-lived (none currently exist in this design, by design).
 - WAF in front of the Container App's public ingress.
 
-**Trivy scan output:** Trivy was not available in the local build sandbox
-(no `trivy` binary on `PATH`, no running Docker daemon), but the scan is
-wired into CI and **did produce real output on the first push** — the
-`security-scan` job's image scan found the 19 npm/yarn-tooling CVEs and the
-1 openssl CVE described above and correctly failed the build (`exit-code:
-1` on CRITICAL/HIGH). See
-[`docs/security-scan-output.txt`](docs/security-scan-output.txt) for the
-actual findings and the fix. The fix itself (stripping npm/yarn, `apk
-upgrade`) was **not yet re-verified against a live Trivy run** in this
-sandbox — the next CI run on push will confirm whether it clears the gate.
+**Trivy scan output:** Trivy was never available in the local sandbox (no
+`trivy` binary, no running Docker daemon), but the scan is wired into CI and
+has now actually run against the pushed repo, twice, with a real
+finding-and-fix cycle in between:
 
-## What was actually verified in this sandbox (honesty section)
+1. First successful run (commit 937ab67) found real findings and correctly
+   **failed the build**: 1 CRITICAL + 18 HIGH Node.js CVEs (all inside
+   npm's/yarn's own bundled dependencies, not the app's) plus 1 HIGH openssl
+   CVE in the alpine base.
+2. After the Dockerfile fix (commit 5a8acd2, stripping unused npm/yarn +
+   `apk upgrade`), the next run's `security-scan` job **succeeded** — no
+   CRITICAL/HIGH findings remained.
 
-This environment had **Node.js 24 / npm 11** and the **Docker CLI**
-available, but **no running Docker daemon**, and **no Terraform or Trivy
-CLI** installed. Concretely:
+Two earlier attempts also failed before any scan even ran, because of bad
+`trivy-action` version pins (a missing `v` prefix, then a deleted nested
+action dependency) — also captured for the record. Full timeline and the
+actual finding tables:
+[`docs/security-scan-output.txt`](docs/security-scan-output.txt).
+
+## What was actually verified (honesty section)
+
+The local sandbox this repo was built in had **Node.js 24 / npm 11** and the
+**Docker CLI** available, but no running Docker daemon and no Terraform or
+Trivy CLI installed — so Docker/Terraform/Trivy could never be exercised
+*locally*. The repo has since been pushed to GitHub, though, and GitHub
+Actions has actually run the pipeline against real infrastructure (a GitHub-
+hosted runner with Docker, Trivy, and network access) multiple times. What
+follows separates what ran locally from what ran for real in CI:
 
 | Item | Status |
 |---|---|
-| `npm install` in `app/` | **Ran successfully**, `package-lock.json` generated |
-| `npm test` (`node --test`) | **Ran successfully** — 2/2 tests pass (`GET /health`, `GET /`) |
-| `node server.js` + `curl /health` and `/` | **Ran successfully** locally, both endpoints returned expected JSON |
-| `docker build` / `docker run` | **Not executed** — `docker --version` succeeded (Docker CLI present) but `docker build` failed with `failed to connect to the docker API ... check if the daemon is running`; Docker Desktop's engine was not running in this sandbox and was not started (no GUI app launching from this agent). The Dockerfile was written carefully by hand (standard multi-stage Node/Alpine pattern) but **is unverified by an actual build** — please run the two commands under "Docker" above yourself to confirm. |
-| `terraform fmt` / `validate` / `plan` | **Not executed** — Terraform CLI not present in this sandbox (`where terraform` found nothing). Files were hand-written against current `azurerm` provider syntax but are **unverified**; run `terraform init && terraform validate` yourself before trusting them. |
-| `terraform apply` | **Deliberately not run** — no Azure credentials in this sandbox, and the task explicitly excluded touching a live cloud account. |
-| Trivy scans | **Not executed** — no `trivy` binary and no built image to scan against (see above). Fully wired into CI instead. |
-| CI/CD pipeline (`.github/workflows/pipeline.yaml`) | **Not executed** — GitHub Actions only runs on GitHub after a push; this repo was not pushed (per instructions). The YAML was written carefully and reviewed by hand for job dependencies, `if:` conditions, and secret/variable references, but has **not been run**. |
+| `npm install` in `app/` | **Ran locally**, `package-lock.json` generated |
+| `npm test` (`node --test`) | **Ran locally** — 2/2 tests pass (`GET /health`, `GET /`) |
+| `node server.js` + `curl /health` and `/` | **Ran locally**, both endpoints returned expected JSON |
+| `docker build` / `docker run` | **Not run locally** — no Docker daemon in the sandbox. **Ran successfully in CI** repeatedly (`build-test` job builds and smoke-tests the image on every push/PR). |
+| `npm test` + Docker build/smoke-test | **Ran in CI** — `build-test` job is green on every run so far. |
+| Trivy dependency (SCA) + image scans | **Ran for real in CI**, including one genuine fail → fix → pass cycle. First real run found and correctly failed on 1 CRITICAL + 18 HIGH real CVEs; after the Dockerfile fix, the next run's `security-scan` job succeeded with none remaining. Two earlier attempts failed before any scan ran, due to bad action version pins — also fixed. Full timeline in [`docs/security-scan-output.txt`](docs/security-scan-output.txt). |
+| SARIF upload to code scanning | **Ran in CI** on every `security-scan` run (`github/codeql-action/upload-sarif`); check the repo's Security → Code scanning tab. |
+| `terraform fmt` / `validate` / `plan` | **Not executed anywhere** — Terraform CLI isn't installed in the local sandbox, and the pipeline doesn't run Terraform at all (infra is applied manually per `infra/README.md`, not via CI). Files were hand-written against current `azurerm` provider syntax but remain **unverified**; run `terraform init && terraform validate` yourself before trusting them. |
+| `terraform apply` | **Deliberately not run anywhere** — no Azure credentials were ever wired up, and the task explicitly excluded touching a live cloud account. |
+| `push` / `deploy` CI jobs (ACR push, Container Apps deploy) | **Not run** — both are gated on `github.ref == 'refs/heads/main'` *and* need the repo variables/federated credential listed above configured; those haven't been set up, so these jobs haven't executed yet. |
 
-**Bottom line for the reviewer:** the application code and its test suite
-are the only pieces that were actually run and confirmed working in this
-sandbox. The Dockerfile, Terraform, CI/CD pipeline, and Trivy scan step are
-all written to be correct and are internally consistent, but need Docker,
-Terraform, Trivy, and a live Azure subscription (respectively) to be
-verified — none of which were available here. Please run the "Run
-instructions" above yourself, and push this repo with the repo
-variables/federated credential configured, to see the rest execute for
-real.
+**Bottom line for the reviewer:** the app, its tests, the Docker build, and
+the Trivy security gate have all now been verified for real — not just
+claimed — via actual GitHub Actions runs against the pushed repo, including
+a real bug hunt (two broken action pins, one genuine vulnerability finding
+traced back to unused base-image tooling). What's still unverified is
+Terraform against a live Azure subscription and the `push`/`deploy` jobs,
+both of which need real Azure credentials that were never available here.

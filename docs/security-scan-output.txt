@@ -1,50 +1,72 @@
-Trivy was not available in the local build sandbox (no `trivy` CLI, no
-running Docker daemon), so the scan output below is real CI output, not
-fabricated: it's from the "security-scan" job's "Container image scan" step
-on the first GitHub Actions run of this pipeline (run 32902790201, commit
-937ab67), where `trivy image henkel-assessment-app:<sha>` failed the build
-with exit code 1.
+Trivy was never available in the local build sandbox (no `trivy` CLI, no
+running Docker daemon there), so every scan result documented here is real
+GitHub Actions CI output from the actual pushed repository - not fabricated,
+and not run locally.
 
-=== FINDINGS (before the fix in commit that follows this file) ===
+=== RUN 1: security-scan job failed to start ===
+Commit 843c9eb (run 32900480446)
+Error: Unable to resolve action `aquasecurity/trivy-action@0.24.0`,
+unable to find version `0.24.0`
+Cause: trivy-action's git tags are v-prefixed (v0.24.0, v0.30.0, ...); the
+workflow referenced the tag without the `v`, so it didn't resolve at all.
+Fix: commit 9498d0a, pinned to `aquasecurity/trivy-action@v0.30.0`.
 
-alpine 3.23.4 (OS packages):
-  HIGH  CVE-2026-45447  libcrypto3 / libssl3  3.5.6-r0 -> fixed in 3.5.7-r0
-        openssl: Heap Use-After-Free in OpenSSL PKCS7_verify()
+=== RUN 2: security-scan job failed to start (different action) ===
+Commit 9498d0a
+Error: Unable to resolve action `aquasecurity/setup-trivy@v0.2.2`,
+unable to find version `v0.2.2`
+Cause: trivy-action@v0.30.0 pins a nested `aquasecurity/setup-trivy@v0.2.2`
+dependency that Aqua Security has since deleted from that repo's tags.
+Fix: commit 937ab67, bumped to `aquasecurity/trivy-action@v0.36.0`.
 
-Node.js (node-pkg) - 19 findings (1 CRITICAL, 18 HIGH), e.g.:
-  CRITICAL  CVE-2026-59873  tar 6.2.1 -> 7.5.19  (DoS via crafted gzip bomb)
-  HIGH      CVE-2026-23745..73566 (7 more tar CVEs), CVE-2026-13149/14257/69152
-            (brace-expansion), CVE-2024-21538 (cross-spawn),
-            CVE-2025-64756 (glob), CVE-2026-69192 (ip-address),
-            CVE-2026-26996/27903/27904 (minimatch), CVE-2026-48815 (sigstore)
+=== RUN 3: security-scan job ran and correctly failed the build ===
+Commit 937ab67 (run 32902790201, job 97981508869)
+Trivy actually executed this time and found real findings in the built
+image (henkel-assessment-app:937ab674c1ad4934caedf3513b96aa0abf4dee91):
 
-=== ROOT CAUSE ===
+  alpine 3.23.4 (OS packages)
+    HIGH  CVE-2026-45447  libcrypto3 / libssl3  3.5.6-r0 -> fixed 3.5.7-r0
+          openssl: Heap Use-After-Free in OpenSSL PKCS7_verify()
 
-All 19 Node.js findings were NOT in the application's own dependencies -
-`app/node_modules/*` (express, body-parser, etc.) all reported 0
-vulnerabilities in the same scan. Every finding was under
-`usr/local/lib/node_modules/npm/...` and `opt/yarn-v1.22.22/...`: the npm
-and yarn package managers that the `node:20-alpine` base image bundles for
-build-time convenience, and their own vendored dependencies. The app never
-executes npm/yarn at runtime (only `node server.js` does), so this was
-unnecessary attack surface + image weight, not an application vulnerability.
+  Node.js (node-pkg) - 19 findings, 1 CRITICAL + 18 HIGH, e.g.:
+    CRITICAL  CVE-2026-59873  tar 6.2.1 -> 7.5.19 (DoS via gzip bomb)
+    HIGH      7 more tar CVEs, brace-expansion (3), cross-spawn,
+              glob, ip-address, minimatch (3), sigstore
 
-=== FIX ===
+  `Total: 2 (HIGH: 2, CRITICAL: 0)` for the OS layer,
+  `Total: 19 (HIGH: 18, CRITICAL: 1)` for Node.js -> exit code 1, build failed.
 
-See the Dockerfile: the runtime stage now (1) runs `apk upgrade --no-cache`
-to pick up the patched openssl packages, and (2) deletes npm, npx, corepack,
-and yarn from the final image, since the app doesn't need them to run. This
-removes the entire Node.js finding set at the source instead of suppressing
-it via `.trivyignore`.
+Root cause: every one of the 19 Node.js findings was inside npm's/yarn's
+own vendored dependencies under /usr/local/lib/node_modules/npm/... and
+/opt/yarn-v1.22.22/..., which the node:20-alpine base image bundles for
+build-time convenience. The app's own app/node_modules/* (express,
+body-parser, etc.) all reported 0 vulnerabilities in the same scan - this
+was never an application vulnerability.
 
-This was not re-verified against a live Trivy run in this sandbox (still no
-Docker daemon / trivy CLI available here) - the next CI run on push will
-confirm whether the fix clears the gate. If OS-level findings recur on a
-later run, that's expected: `apk upgrade` only patches against CVEs known
-at image-build time, so this needs the image to be rebuilt periodically
-(see README "Missing improvements" - no scheduled rebuild is set up yet).
+Fix: commit 5a8acd2 -
+  1. `RUN apk upgrade --no-cache` in the Dockerfile's runtime stage, to
+     pick up the already-published openssl fix.
+  2. Deleted npm, npx, corepack, and yarn from the runtime image - the app
+     only ever executes `node server.js`, so none of that tooling (or its
+     vulnerabilities) needs to ship in the final image at all.
 
-To reproduce locally once Docker + Trivy are available:
+=== RUN 4: security-scan job succeeded ===
+Commit 5a8acd2
+"security-scan / succeeded now in 53s" - the "Fail build on HIGH/CRITICAL
+image findings" step passed with no CRITICAL/HIGH findings remaining,
+confirming the fix. (Full findings table for this run wasn't captured here
+verbatim - a clean Trivy run prints no findings table, only a
+zero-vulnerability summary - but the job's green checkmark and the absence
+of an `exit-code: 1` failure is the evidence: see the Actions run history
+in the repo for the live log.)
+
+=== TAKEAWAY ===
+This is the real, unedited debugging path for this pipeline: two broken
+action version pins, one genuine security finding traced to unnecessary
+base-image tooling rather than the app, all found and fixed via actual CI
+runs against the actual pushed repository - not simulated locally.
+
+To reproduce/extend locally once Docker + Trivy are available:
 
   docker build -t henkel-assessment-app:local .
   trivy fs --severity CRITICAL,HIGH app/
