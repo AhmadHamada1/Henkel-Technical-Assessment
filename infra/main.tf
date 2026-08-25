@@ -3,9 +3,9 @@
 
 locals {
   resource_group_name = coalesce(var.resource_group_name, "rg-${var.project_name}-${var.environment}")
-  name_prefix          = "${var.project_name}-${var.environment}"
+  name_prefix         = "${var.project_name}-${var.environment}"
   # ACR names must be globally unique, alphanumeric only, 5-50 chars.
-  acr_name            = replace("${var.project_name}${var.environment}acr", "-", "")
+  acr_name = replace("${var.project_name}${var.environment}acr", "-", "")
 }
 
 resource "azurerm_resource_group" "main" {
@@ -42,17 +42,17 @@ resource "azurerm_role_assignment" "acr_pull" {
 module "container_app" {
   source = "./modules/container_app"
 
-  name_prefix          = local.name_prefix
-  resource_group_name  = azurerm_resource_group.main.name
-  location             = azurerm_resource_group.main.location
-  identity_id          = module.identity.id
-  registry_server      = module.registry.login_server
-  container_image      = var.container_image
-  container_cpu        = var.container_cpu
-  container_memory     = var.container_memory
-  min_replicas         = var.min_replicas
-  max_replicas         = var.max_replicas
-  tags                 = var.tags
+  name_prefix         = local.name_prefix
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  identity_id         = module.identity.id
+  registry_server     = module.registry.login_server
+  container_image     = var.container_image
+  container_cpu       = var.container_cpu
+  container_memory    = var.container_memory
+  min_replicas        = var.min_replicas
+  max_replicas        = var.max_replicas
+  tags                = var.tags
 
   depends_on = [azurerm_role_assignment.acr_pull]
 }
